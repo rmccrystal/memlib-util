@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "memflow-adapter",
+    "page-verification-adapter",
+    "vdm",
+    "usermode"
+]
