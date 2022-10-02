@@ -1,21 +1,38 @@
 #![feature(generic_associated_types)]
 
-use memlib::{AttachedProcess, Module};
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcess, PROCESS_ALL_ACCESS};
+use std::mem;
+use std::mem::MaybeUninit;
+use memlib::{AttachedProcess, MemoryAllocateError, MemoryProtectError, MemoryProtection, MemoryRange, Module};
+use windows::Win32::Foundation::{BOOL, CloseHandle, GetLastError, HANDLE};
+use windows::Win32::System::Threading::{CreateRemoteThread, GetCurrentProcess, GetCurrentProcessId, GetExitCodeThread, LPTHREAD_START_ROUTINE, OpenProcess, PROCESS_ALL_ACCESS, WaitForSingleObject};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
+use windows::Win32::System::Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_PROTECTION_FLAGS, VIRTUAL_ALLOCATION_TYPE, VirtualAlloc, VirtualAllocEx, VirtualFree, VirtualFreeEx, VirtualProtectEx};
 use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_MOUSE, INPUT_TYPE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput};
 
+#[derive(Default, Clone)]
 pub struct Usermode;
 
+impl Usermode {
+    pub fn create_remote_thread(&self, pid: &Process, proc: u64, arg: Option<u64>) -> windows::core::Result<u32> {
+        log::trace!("create_remote_thread({pid}): entry = {proc:#X}, arg = {arg:#X?}", pid=pid.pid);
+        unsafe {
+            let handle = CreateRemoteThread(pid.handle, None, 0, mem::transmute(proc), arg.map(|n| n as _), 0, None)?;
+            WaitForSingleObject(handle, 5000).ok()?;
+            let mut exit_code = 0;
+            GetExitCodeThread(handle, &mut exit_code).ok()?;
+            Ok(exit_code)
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
-pub struct UsermodeProcess {
+pub struct Process {
     pub handle: HANDLE,
     pub pid: u32,
 }
 
 impl memlib::GetContext for Usermode {
-    type Context = UsermodeProcess;
+    type Context = Process;
 
     fn get_context_from_name(&self, process_name: &str) -> Option<Self::Context> {
         winutil::get_process_list().unwrap().into_iter()
@@ -26,7 +43,7 @@ impl memlib::GetContext for Usermode {
     fn get_context_from_pid(&self, pid: u32) -> Option<Self::Context> {
         unsafe {
             let handle = OpenProcess(PROCESS_ALL_ACCESS, false, pid).ok()?;
-            Some(UsermodeProcess { handle, pid })
+            Some(Process { handle, pid })
         }
     }
 
@@ -34,7 +51,7 @@ impl memlib::GetContext for Usermode {
         unsafe {
             match GetCurrentProcess() {
                 HANDLE(0) => panic!("GetCurrentProcess returned 0"),
-                handle => UsermodeProcess { handle, pid: GetCurrentProcessId() },
+                handle => Process { handle, pid: GetCurrentProcessId() },
             }
         }
     }
@@ -101,6 +118,42 @@ impl memlib::ModuleListPid for Usermode {
 
     fn get_main_module(&self, pid: &Self::Context) -> Module {
         self.get_module_list(pid).into_iter().next().unwrap()
+    }
+}
+
+impl memlib::MemoryAllocatePid for Usermode {
+    fn allocate_pid(&self, pid: &Self::Context, size: u64, protection: MemoryProtection) -> Result<u64, MemoryAllocateError> {
+        log::trace!("allocate({pid}): size = {size:#X}, protection = {protection:?}", pid=pid.pid);
+        unsafe {
+            match VirtualAllocEx(Some(pid.handle), None, size as _, MEM_COMMIT | MEM_RESERVE, PAGE_PROTECTION_FLAGS(protection.bits())) as u64 {
+                0 => Err(MemoryAllocateError::NtStatus(GetLastError().0)),
+                n => Ok(n)
+            }
+        }
+    }
+
+    fn free_pid(&self, pid: &Self::Context, base: u64, size: u64) -> Result<(), MemoryAllocateError> {
+        log::trace!("free({pid}): base = {base:#X}, size = {size:#X}", pid=pid.pid);
+        unsafe {
+            match VirtualFreeEx(pid.handle, base as _, size as _, MEM_RELEASE) {
+                FALSE => Err(MemoryAllocateError::NtStatus(GetLastError().0)),
+                TRUE => Ok(())
+            }
+        }
+    }
+}
+
+impl memlib::MemoryProtectPid for Usermode {
+    fn set_protection_pid(&self, pid: &Self::Context, range: MemoryRange, protection: MemoryProtection) -> Result<MemoryProtection, MemoryProtectError> {
+        log::trace!("protect({pid}): range = {range:#X?}, protection = {protection:?}", pid=pid.pid);
+        unsafe {
+            let mut old_protection = MaybeUninit::<PAGE_PROTECTION_FLAGS>::uninit();
+            match VirtualProtectEx(pid.handle, range.start as _, (range.end - range.start) as _, PAGE_PROTECTION_FLAGS(protection.bits()), old_protection.as_mut_ptr()).0 {
+                0 => Err(MemoryProtectError::NtStatus(GetLastError().0)),
+                1 => Ok(MemoryProtection::from_bits(old_protection.assume_init().0).unwrap()),
+                _ => unreachable!(),
+            }
+        }
     }
 }
 
