@@ -1,7 +1,7 @@
 use std::time::Duration;
 use memlib::ProcessAttach;
 use manualmap::{Mapper, ModuleResolver};
-use memlib_usermode::Usermode;
+use usermode::Usermode;
 
 fn main() {
     pretty_env_logger::init();

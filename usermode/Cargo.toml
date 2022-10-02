@@ -1,5 +1,5 @@
 [package]
-name = "memlib-usermode"
+name = "usermode"
 version = "0.1.0"
 edition = "2021"
 
