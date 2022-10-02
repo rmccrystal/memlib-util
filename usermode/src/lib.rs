@@ -2,6 +2,7 @@
 
 use std::mem;
 use std::mem::MaybeUninit;
+use std::time::Duration;
 use memlib::{AttachedProcess, MemoryAllocateError, MemoryProtectError, MemoryProtection, MemoryRange, Module};
 use windows::Win32::Foundation::{BOOL, CloseHandle, GetLastError, HANDLE};
 use windows::Win32::System::Threading::{CreateRemoteThread, GetCurrentProcess, GetCurrentProcessId, GetExitCodeThread, LPTHREAD_START_ROUTINE, OpenProcess, PROCESS_ALL_ACCESS, WaitForSingleObject};
@@ -13,14 +14,20 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_MOUSE, I
 pub struct Usermode;
 
 impl Usermode {
-    pub fn create_remote_thread(&self, pid: &Process, proc: u64, arg: Option<u64>) -> windows::core::Result<u32> {
+    pub fn create_remote_thread(&self, pid: &Process, proc: u64, arg: Option<u64>, timeout: Option<Duration>) -> windows::core::Result<Option<u32>> {
         log::trace!("create_remote_thread({pid}): entry = {proc:#X}, arg = {arg:#X?}", pid=pid.pid);
         unsafe {
             let handle = CreateRemoteThread(pid.handle, None, 0, mem::transmute(proc), arg.map(|n| n as _), 0, None)?;
-            WaitForSingleObject(handle, 5000).ok()?;
-            let mut exit_code = 0;
-            GetExitCodeThread(handle, &mut exit_code).ok()?;
-            Ok(exit_code)
+            if let Some(timeout) = timeout {
+                if WaitForSingleObject(handle, timeout.as_millis() as _).ok().is_err() {
+                    return Ok(None)
+                }
+                let mut exit_code = 0;
+                GetExitCodeThread(handle, &mut exit_code).ok()?;
+                Ok(Some(exit_code))
+            } else {
+                Ok(None)
+            }
         }
     }
 }
@@ -161,14 +168,19 @@ impl memlib::MouseMove for Usermode {
     fn mouse_move(&self, dx: i32, dy: i32) {
         unsafe {
             // use SendInput to send mouse input
-            let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT {
-                dx,
-                dy,
-                mouseData: 0,
-                dwFlags: MOUSEEVENTF_MOVE,
-                time: 0,
-                dwExtraInfo: 0
-            } } };
+            let input = INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: INPUT_0 {
+                    mi: MOUSEINPUT {
+                        dx,
+                        dy,
+                        mouseData: 0,
+                        dwFlags: MOUSEEVENTF_MOVE,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    }
+                },
+            };
             SendInput(&[input], std::mem::size_of::<INPUT>() as _);
         }
     }
