@@ -3,6 +3,7 @@ use windows::Win32::System::Memory::{IsBadReadPtr, IsBadWritePtr};
 use windows::Win32::System::Threading::GetCurrentProcessId;
 
 /// An implementation of memlib traits for dealing with memory internally.
+#[derive(Default)]
 pub struct Internal;
 
 fn is_bad_read<T>(ptr: *const T) -> bool {
