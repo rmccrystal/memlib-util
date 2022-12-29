@@ -2,5 +2,6 @@
 members = [
     "vdm",
     "usermode",
-    "manualmap"
+    "manualmap",
+    "internal"
 ]
