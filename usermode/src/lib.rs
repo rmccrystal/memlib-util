@@ -17,7 +17,7 @@ impl Usermode {
     pub fn create_remote_thread(&self, pid: &Process, proc: u64, arg: Option<u64>, timeout: Option<Duration>) -> windows::core::Result<Option<u32>> {
         log::trace!("create_remote_thread({pid}): entry = {proc:#X}, arg = {arg:#X?}", pid=pid.pid);
         unsafe {
-            let handle = CreateRemoteThread(pid.handle, None, 0, mem::transmute(proc), arg.map(|n| n as _), 0, None)?;
+            let handle = CreateRemoteThread(pid.handle, None, 0, mem::transmute(proc as usize), arg.map(|n| n as _), 0, None)?;
             if let Some(timeout) = timeout {
                 if WaitForSingleObject(handle, timeout.as_millis() as _).ok().is_err() {
                     return Ok(None)
