@@ -1,4 +1,3 @@
-#![feature(let_else)]
 extern crate core;
 
 use std::iter;

@@ -1,5 +1,6 @@
 #![feature(generic_associated_types)]
 
+use std::ffi::CStr;
 use std::mem;
 use std::mem::MaybeUninit;
 use std::time::Duration;
@@ -7,6 +8,7 @@ use memlib::{AttachedProcess, MemoryAllocateError, MemoryProtectError, MemoryPro
 use windows::Win32::Foundation::{BOOL, CloseHandle, GetLastError, HANDLE};
 use windows::Win32::System::Threading::{CreateRemoteThread, GetCurrentProcess, GetCurrentProcessId, GetExitCodeThread, LPTHREAD_START_ROUTINE, OpenProcess, PROCESS_ALL_ACCESS, WaitForSingleObject};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
+use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Module32First, Module32Next, MODULEENTRY32, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32};
 use windows::Win32::System::Memory::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_PROTECTION_FLAGS, VIRTUAL_ALLOCATION_TYPE, VirtualAlloc, VirtualAllocEx, VirtualFree, VirtualFreeEx, VirtualProtectEx};
 use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_MOUSE, INPUT_TYPE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput};
 
@@ -120,7 +122,35 @@ impl memlib::ProcessInfoPid for Usermode {
 
 impl memlib::ModuleListPid for Usermode {
     fn get_module_list(&self, pid: &Self::Context) -> Vec<Module> {
-        winutil::get_module_list(&AttachedProcess::new(self, *pid)).unwrap()
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid.pid).unwrap();
+            if snapshot.0 == 0 {
+                panic!("CreateToolhelp32Snapshot returned 0");
+            }
+
+            let mut module_entry: MODULEENTRY32 = MaybeUninit::zeroed().assume_init();
+            module_entry.dwSize = mem::size_of::<MODULEENTRY32>() as _;
+
+            let mut modules = Vec::new();
+
+            if Module32First(snapshot, &mut module_entry).as_bool() {
+                loop {
+                    let name = CStr::from_ptr(module_entry.szModule.as_ptr() as _).to_str().unwrap().to_string();
+                    modules.push(Module {
+                        name,
+                        base: module_entry.modBaseAddr as _,
+                        size: module_entry.modBaseSize as _,
+                    });
+                    if !Module32Next(snapshot, &mut module_entry).as_bool() {
+                        break;
+                    }
+                }
+            } else { panic!("Module32First failed") }
+
+            CloseHandle(snapshot).unwrap();
+
+            modules
+        }
     }
 
     fn get_main_module(&self, pid: &Self::Context) -> Module {
