@@ -75,7 +75,7 @@ impl memlib::ProcessInfo for Internal {
         unsafe {
             std::arch::asm!("mov {}, fs:0x30", out(reg) peb);
         }
-        peb
+        peb.into()
     }
 
     fn pid(&self) -> u32 {
