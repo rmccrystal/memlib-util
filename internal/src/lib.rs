@@ -68,7 +68,7 @@ impl memlib::ProcessInfo for Internal {
     }
 
     #[cfg(target_pointer_width = "32")]
-    fn peb_base_address(&self) -> u32 {
+    fn peb_base_address(&self) -> u64 {
         // Get peb
         // mov     eax, fs:30h
         let peb: u32;
