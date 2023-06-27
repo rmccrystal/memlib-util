@@ -3,5 +3,6 @@ members = [
     "vdm",
     "usermode",
     "manualmap",
-    "internal"
+    "internal",
+    "objectview"
 ]
