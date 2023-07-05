@@ -88,7 +88,11 @@ pub trait ObjectExt: Object {
     }
 
     fn read_object(&self, memory: &impl memlib::MemoryRead, offset: u64) -> Result<BaseObject> {
-        BaseObject::from_address(memory, self.read_offset::<umem>(memory, offset))
+        self.read_object_as(memory, offset)
+    }
+
+    fn read_object_as<T: FromAddress>(&self, memory: &impl memlib::MemoryRead, offset: u64) -> Result<T> {
+        T::from_address(memory, self.read_offset::<umem>(memory, offset))
     }
 
     /// Reads an arbitrary type from the object's base address + offset
