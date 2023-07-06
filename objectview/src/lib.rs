@@ -288,6 +288,7 @@ pub macro object {
 //     $crate::object!($derived, $crate::BaseObject);
 // },
 ($derived:ident, $base:ty) => {
+        #[derive(Copy, Clone, PartialEq, Eq)]
         pub struct $derived($base);
 
         impl Object for $derived {
